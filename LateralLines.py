@@ -87,10 +87,10 @@ def LateralLines():
     arcpy.FeatureClassToFeatureClass_conversion(pacp_observations, lateral_lines, "Connections", "Code IN ('TB', 'TBA', 'TBB', 'TBD', 'TBI', 'TF', 'TFA', 'TFB', 'TFC', 'TFD', 'TFI', 'TS', 'TSD')")
     arcpy.MakeFeatureLayer_management(pacp_observations_temp, "Connections")
 
-    def AddFields():
+    def AddBearing():
 
         # Add/remove fields
-        arcpy.AddFields_management("ssGravityMain", [["BEARING", "DOUBLE", "Bearing", 5, 0]])
+        arcpy.AddField_management("ssGravityMain", "BEARING", "DOUBLE", field_length=5, field_alias="Bearing")
         arcpy.CalculateGeometryAttributes_management("ssGravityMain", [["BEARING", "LINE_BEARING"]])
 
     def CreateLines():
@@ -100,6 +100,7 @@ def LateralLines():
         arcpy.MakeRouteEventLayer_lr("Routes", "FACILITYID", event_table, "AssetName POINT AtDistance", "RouteEvents")
         arcpy.SpatialJoin_analysis("RouteEvents", "ssGravityMain", "Connections", "JOIN_ONE_TO_ONE", "KEEP_ALL")
 
+    def AddFields():
         # Add more fields
         arcpy.AddXY_management("Connections")
         arcpy.AddFields_management("Connections",
@@ -115,6 +116,7 @@ def LateralLines():
                                       "STAGE", "SLRATCOND", "CCTVCOND", "CCTVDATE", "ID", "AssetID", "Join_Count", "AssetSubType", "Percentage", "Length", "LengthUOM", "UntilAngle", "UntilAngleUOM",
                                       "PercentageUOM"])
 
+    def BearingCalculation():
         # Calculate LATDIST
         arcpy.CalculateField_management("Connections", "LATDIST", 25, "PYTHON3")
 
@@ -158,11 +160,19 @@ def LateralLines():
         logger.info("--- Script Execution Started ---")
 
         logger.info("--- --- --- --- Add Fields Start")
-        AddFields()
+        AddBearing()
         logger.info("--- --- --- --- Add Fields Complete")
 
         logger.info("--- --- --- --- Create Lines Start")
         CreateLines()
+        logger.info("--- --- --- --- Create Lines Complete")
+
+        logger.info("--- --- --- --- Create Lines Start")
+        AddFields()
+        logger.info("--- --- --- --- Create Lines Complete")
+
+        logger.info("--- --- --- --- Create Lines Start")
+        BearingCalculation()
         logger.info("--- --- --- --- Create Lines Complete")
 
     except (IOError, KeyError, NameError, IndexError, TypeError, UnboundLocalError):
