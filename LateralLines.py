@@ -62,12 +62,12 @@ def LateralLines():
 
     # Paths
     fgdb_services = r"F:\Shares\FGDB_Services"
-    sde = os.path.join(fgdb_services, r"DatabaseConnections\da@mcwintcwdb.sde")
+    sde = os.path.join(fgdb_services, r"DatabaseConnections\da@mcwintcwdb.cwprod@imspfld.sde")
     lateral_lines = os.path.join(fgdb_services, r"Data\LateralLines.gdb")
     event_table = r"\\mcwintcw01\GNET_DATA$\GNET_SanitaryObservation.gdb\GNet_WwMainlineObservation"
     sewer_engineering = os.path.join(sde, "SewerEngineering")
     pacp_observations = os.path.join(sewer_engineering, "pacpObservations")
-    pacp_observations_temp = os.path.join(lateral_lines, "pacpObservations")
+    pacp_observations_temp = os.path.join(lateral_lines, "Connections")
     sewer_stormwater = os.path.join(sde, "SewerStormwater")
     gravity_mains = os.path.join(sewer_stormwater, "ssGravityMain")
     gravity_mains_temp = os.path.join(lateral_lines, "ssGravityMain")
@@ -77,37 +77,43 @@ def LateralLines():
     laterals = os.path.join(lateral_lines, "Laterals")
 
     # Environment
+    arcpy.env.workspace = lateral_lines
     arcpy.env.overwriteOutput = True
     arcpy.SpatialReference(3436)
 
+    # Create temporary data
+    arcpy.FeatureClassToFeatureClass_conversion(gravity_mains, lateral_lines, "ssGravityMain", "OWNEDBY = 1 And WATERTYPE <> 'SW' And Stage = 0")
+    arcpy.MakeFeatureLayer_management(gravity_mains_temp, "ssGravityMain")
+    arcpy.FeatureClassToFeatureClass_conversion(pacp_observations, lateral_lines, "Connections", "Code IN ('TB', 'TBA', 'TBB', 'TBD', 'TBI', 'TF', 'TFA', 'TFB', 'TFC', 'TFD', 'TFI', 'TS', 'TSD')")
+    arcpy.MakeFeatureLayer_management(pacp_observations_temp, "Connections")
+
     def AddFields():
-        # Create temporary data
-        arcpy.FeatureClassToFeatureClass_conversion(gravity_mains, lateral_lines, "ssGravityMain", "OWNEDBY = 1 And WATERTYPE <> 'SW And Stage = 0")
-        arcpy.MakeFeatureLayer_management(gravity_mains_temp, "ssGravityMain")
-        arcpy.FeatureClassToFeatureClass_conversion(pacp_observations, lateral_lines, "Connections", "Code IN ('TB', 'TBA', 'TBB', 'TBD', 'TBI', 'TF', 'TFA', 'TFB', 'TFC', 'TFD', 'TFI', 'TS', 'TSD')")
-        arcpy.MakeFeatureLayer_management(pacp_observations_temp, "Connections")
 
         # Add/remove fields
-        arcpy.AddField_management("ssGravityMain", "from_measure_field", "DOUBLE")
-        arcpy.CalculateField_management("ssGravityMain", "from_measure_field", 0, "PYTHON3")
-        arcpy.AddGeometryAttributes_management("ssGravityMain", ["BEARING", "LINE_BEARING"])
+        arcpy.AddFields_management("ssGravityMain", [["BEARING", "DOUBLE", "Bearing", 5, 0]])
+        arcpy.CalculateGeometryAttributes_management("ssGravityMain", [["BEARING", "LINE_BEARING"]])
+
+    def CreateLines():
+        # Place observations along gravity mains based off of length and direction
+        arcpy.CreateRoutes_lr("ssGravityMain", "FACILITYID", routes)
+        arcpy.MakeFeatureLayer_management(routes, "Routes")
+        arcpy.MakeRouteEventLayer_lr("Routes", "FACILITYID", event_table, "AssetName POINT AtDistance", "RouteEvents")
+        arcpy.SpatialJoin_analysis("RouteEvents", "ssGravityMain", "Connections", "JOIN_ONE_TO_ONE", "KEEP_ALL")
+
+        # Add more fields
+        arcpy.AddXY_management("Connections")
+        arcpy.AddFields_management("Connections",
+                                   [["LATID", "TEXT", None, 30],
+                                    ["LATDIST", "DOUBLE"]])
         arcpy.DeleteField_management("Connections",
                                      ["Join_County", "TARGET_FID", "MODIFIER", "CollectedBy", "CorrectiveActionRequired", "CorrectiveActionTaken", "Rating", "SedimentDepth", "PercentageCapacityLoss", "DefectSource",
                                       "Altitude", "Satellites", "HDOP", "PDOP", "SNR", "GpsSource", "ContinuousMark", "StillImage1", "StillImage2", "StillImage3", "VideoSegment", "RefPoint", "RefAngleUOM",
-                                      "Continuous", "SedimentDepthUOM", "PercentageCapacityLossUOM", "Quantification1", "Quantification2", "SurvDistance", "FACILITYID", "InstallDate", "Material", "Diameter",
+                                      "Continuous", "SedimentDepthUOM", "PercentageCapacityLossUOM", "Quantification1", "Quantification2s", "SurvDistance", "FACILITYID", "InstallDate", "Material", "Diameter",
                                       "MAINSHAPE", "LINEDYEAR", "LINERTYPE", "WATERTYPE", "ENABLED", "ACTIVEFLAG", "OWNEDBY", "MAINTBY", "SUMFLOW", "LASTUPDATE", "LASTEDITOR", "DOWNELEV", "UPELEV", "SLOPE",
                                       "COMMENT", "SPATAILID", "ADDRESS", "DISTRICT", "PLANT", "SOURCEID", "SOURCEATT", "SOURCEZ", "SOURCEXY", "NAD83XSTART", "NAD83YSTART", "SPATAILSTART", "NAD83XEND", "NAD83YEND",
                                       "SPATAILEND", "SURFCOND", "SURVMATERIAL", "SURVHEIGHT", "SURVSHAPE", "SURVDSELEV", "SURVUSELEV", "SURVLENGTH", "SURVSLOPE", "GXPCITY", "SLRATID", "SLRATSCORE", "SLRATSTATUS",
                                       "STAGE", "SLRATCOND", "CCTVCOND", "CCTVDATE", "ID", "AssetID", "Join_Count", "AssetSubType", "Percentage", "Length", "LengthUOM", "UntilAngle", "UntilAngleUOM",
                                       "PercentageUOM"])
-        arcpy.AddFields_management("Connections", [["LATID", "TEXT", None, 30], ["LATDIST", "DOUBLE"]])
-        arcpy.AddXY_management("Connections")
-
-    def CreateLines():
-        # Place observations along gravity mains based off of length and direction
-        arcpy.CreateRoutes_lr("ssGravityMain", "FACILITYID", routes, "TWO_FIELDS", "zero_val", "SHAPE_Length", "UPPER_LEFT", 1, 0, "IGNORE", "INDEX")
-        arcpy.MakeRouteEventLayer_lr(routes, "FACILITYID", event_table, "AssetName POINT AtDistance", "RouteEvents")
-        arcpy.SpatialJoin_analysis(routes, "ssGravityMain", "Connections", "JOIN_ONE_TO_ONE", "KEEP_ALL", None, "INTERSECT")
 
         # Calculate LATDIST
         arcpy.CalculateField_management("Connections", "LATDIST", 25, "PYTHON3")
@@ -141,16 +147,14 @@ def LateralLines():
                                           ["BEARING", "!BEARING!+90"]])
 
         # Use all of this new information to make a 25ft line running at a bearing determined by direction and angle
-        selected_connections = arcpy.SelectLayerByAttribute_management("Connections", "NEW_SELECTION", "LATBEARING IS NOT NULL")
-        arcpy.BearingDistanceToLine_management(selected_connections, laterals, "POINT_X", "POINT_Y", "LATDIST", "FEET", "LATBEARING")
+        selected_connections = arcpy.SelectLayerByAttribute_management("Connections", "NEW_SELECTION", "BEARING IS NOT NULL")
+        arcpy.BearingDistanceToLine_management(selected_connections, laterals, "POINT_X", "POINT_Y", "LATDIST", "FEET", "BEARING")
 
     # Run the above functions with logger error catching and formatting
 
     logger = start_rotating_logging()
 
     try:
-
-        logger.info("")
         logger.info("--- Script Execution Started ---")
 
         logger.info("--- --- --- --- Add Fields Start")
@@ -170,7 +174,8 @@ def LateralLines():
 
     except arcpy.ExecuteError:
         try:
-            logger.error(arcpy.GetMessages(2))
+            tbinfo = traceback.format_exc(2)
+            logger.error(tbinfo)
         except NameError:
             print(arcpy.GetMessages(2))
 
