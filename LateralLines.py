@@ -1,11 +1,11 @@
 """
  SYNOPSIS
 
-     SnowRisk.py
+     LateralLines.py
 
  DESCRIPTION
 
-     This script performs COF, POF, and Risk calculations for snow operations
+     This script converts tap PACP observations from GNET into lateral lines including an estimated bearing.
 
  REQUIREMENTS
 
@@ -18,90 +18,93 @@ import logging
 import os
 import sys
 import traceback
-from logging.handlers import RotatingFileHandler
 
 
-def start_rotating_logging(log_file=None, max_bytes=10000, backup_count=1, suppress_requests_messages=True):
-    """Creates a logger that outputs to stdout and a log file; outputs start and completion of functions or attribution of functions"""
-
-    formatter = logging.Formatter(fmt="%(asctime)s - %(levelname)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
-
-    # Paths to desired log file
-    script_folder = os.path.dirname(sys.argv[0])
-    script_name = os.path.basename(sys.argv[0])
-    script_name_no_ext = os.path.splitext(script_name)[0]
-    log_folder = os.path.join(script_folder, "Log_Files")
-    if not log_file:
-        log_file = os.path.join(log_folder, f"{script_name_no_ext}.log")
-
-    # Start logging
-    the_logger = logging.getLogger(script_name)
-    the_logger.setLevel(logging.DEBUG)
-
-    # Add the rotating file handler
-    log_handler = RotatingFileHandler(filename=log_file, maxBytes=max_bytes, backupCount=backup_count)
-    log_handler.setLevel(logging.DEBUG)
-    log_handler.setFormatter(formatter)
-    the_logger.addHandler(log_handler)
-
-    # Add the console handler
+def ScriptLogging():
+    """Enables console and log file logging; see test script for comments on functionality"""
+    current_directory = os.getcwd()
+    script_filename = os.path.basename(sys.argv[0])
+    log_filename = os.path.splitext(script_filename)[0]
+    log_file = os.path.join(current_directory, f"{log_filename}.log")
+    if not os.path.exists(log_file):
+        with open(log_file, "w"):
+            pass
+    message_formatting = "%(asctime)s - %(levelname)s - %(message)s"
+    date_formatting = "%Y-%m-%d %H:%M:%S"
+    formatter = logging.Formatter(fmt=message_formatting, datefmt=date_formatting)
+    logging_output = logging.getLogger(f"{log_filename}")
+    logging_output.setLevel(logging.INFO)
     console_handler = logging.StreamHandler()
-    console_handler.setLevel(logging.DEBUG)
+    console_handler.setLevel(logging.INFO)
     console_handler.setFormatter(formatter)
-    the_logger.addHandler(console_handler)
-
-    # Suppress SSL warnings in logs if instructed to
-    if suppress_requests_messages:
-        logging.getLogger("requests").setLevel(logging.WARNING)
-        logging.getLogger("urllib3").setLevel(logging.WARNING)
-
-    return the_logger
+    logging_output.addHandler(console_handler)
+    logging.basicConfig(format=message_formatting, datefmt=date_formatting, filename=log_file, filemode="w", level=logging.INFO)
+    return logging_output
 
 
 def LateralLines():
+    """Create lateral lines using PACP observations"""
+
+    # Logging
+    def logging_lines(name):
+        """Use this wrapper to insert a message before and after the function for logging purposes"""
+        if type(name) == str:
+            def logging_decorator(function):
+                def logging_wrapper(*exception):
+                    logger.info(f"{name} Start")
+                    function(*exception)
+                    logger.info(f"{name} Complete")
+                return logging_wrapper
+            return logging_decorator
+
+    logger = ScriptLogging()
+    logger.info("Script Execution Start")
 
     # Paths
     fgdb_services = r"F:\Shares\FGDB_Services"
-    sde = os.path.join(fgdb_services, r"DatabaseConnections\da@mcwintcwdb.cwprod@imspfld.sde")
-    lateral_lines = os.path.join(fgdb_services, r"Data\LateralLines.gdb")
-    event_table = r"\\mcwintcw01\GNET_DATA$\GNET_SanitaryObservation.gdb\GNet_WwMainlineObservation"
+    sde = os.path.join(fgdb_services, r"DatabaseConnections\COSPW@imSPFLD@MCWINTCWDB.sde")
     sewer_engineering = os.path.join(sde, "SewerEngineering")
     pacp_observations = os.path.join(sewer_engineering, "pacpObservations")
-    pacp_observations_temp = os.path.join(lateral_lines, "Connections")
     sewer_stormwater = os.path.join(sde, "SewerStormwater")
     gravity_mains = os.path.join(sewer_stormwater, "ssGravityMain")
+    lateral_lines = os.path.join(fgdb_services, r"Data\LateralLines.gdb")
+    pacp_observations_temp = os.path.join(lateral_lines, "Connections")
     gravity_mains_temp = os.path.join(lateral_lines, "ssGravityMain")
+    event_table = r"\\mcwintcw01\GNET_DATA$\GNET_SanitaryObservation.gdb\GNet_WwMainlineObservation"
 
     # Routes
     routes = os.path.join(lateral_lines, "Routes")
     laterals = os.path.join(lateral_lines, "Laterals")
 
     # Environment
-    arcpy.env.workspace = lateral_lines
     arcpy.env.overwriteOutput = True
-    arcpy.SpatialReference(3436)
 
     # Create temporary data
     arcpy.FeatureClassToFeatureClass_conversion(gravity_mains, lateral_lines, "ssGravityMain", "OWNEDBY = 1 And WATERTYPE <> 'SW' And Stage = 0")
     arcpy.MakeFeatureLayer_management(gravity_mains_temp, "ssGravityMain")
     arcpy.FeatureClassToFeatureClass_conversion(pacp_observations, lateral_lines, "Connections", "Code IN ('TB', 'TBA', 'TBB', 'TBD', 'TBI', 'TF', 'TFA', 'TFB', 'TFC', 'TFD', 'TFI', 'TS', 'TSD')")
-    arcpy.MakeFeatureLayer_management(pacp_observations_temp, "Connections")
 
+    @logging_lines("Add Bearing")
     def AddBearing():
+        """Add a bearing field"""
 
-        # Add/remove fields
         arcpy.AddField_management("ssGravityMain", "BEARING", "DOUBLE", field_length=5, field_alias="Bearing")
         arcpy.CalculateGeometryAttributes_management("ssGravityMain", [["BEARING", "LINE_BEARING"]])
 
+    @logging_lines("Create Lines")
     def CreateLines():
-        # Place observations along gravity mains based off of length and direction
+        """Place observations along gravity mains based off of length and direction"""
+
         arcpy.CreateRoutes_lr("ssGravityMain", "FACILITYID", routes)
         arcpy.MakeFeatureLayer_management(routes, "Routes")
         arcpy.MakeRouteEventLayer_lr("Routes", "FACILITYID", event_table, "AssetName POINT AtDistance", "RouteEvents")
-        arcpy.SpatialJoin_analysis("RouteEvents", "ssGravityMain", "Connections", "JOIN_ONE_TO_ONE", "KEEP_ALL")
+        arcpy.SpatialJoin_analysis("RouteEvents", "ssGravityMain", pacp_observations_temp, "JOIN_ONE_TO_ONE", "KEEP_ALL")
+        arcpy.MakeFeatureLayer_management(pacp_observations_temp, "Connections")
 
+    @logging_lines("Add Fields")
     def AddFields():
-        # Add more fields
+        """Add more fields: LATID, LATDIST"""
+
         arcpy.AddXY_management("Connections")
         arcpy.AddFields_management("Connections",
                                    [["LATID", "TEXT", None, 30],
@@ -116,7 +119,10 @@ def LateralLines():
                                       "STAGE", "SLRATCOND", "CCTVCOND", "CCTVDATE", "ID", "AssetID", "Join_Count", "AssetSubType", "Percentage", "Length", "LengthUOM", "UntilAngle", "UntilAngleUOM",
                                       "PercentageUOM"])
 
+    @logging_lines("Bearing Calculation")
     def BearingCalculation():
+        """Calculate a bearing using PACP clock position and direction"""
+
         # Calculate LATDIST
         arcpy.CalculateField_management("Connections", "LATDIST", 25, "PYTHON3")
 
@@ -152,50 +158,28 @@ def LateralLines():
         selected_connections = arcpy.SelectLayerByAttribute_management("Connections", "NEW_SELECTION", "BEARING IS NOT NULL")
         arcpy.BearingDistanceToLine_management(selected_connections, laterals, "POINT_X", "POINT_Y", "LATDIST", "FEET", "BEARING")
 
-    # Run the above functions with logger error catching and formatting
-
-    logger = start_rotating_logging()
-
+    # Try running above scripts
     try:
-        logger.info("--- Script Execution Started ---")
-
-        logger.info("--- --- --- --- Add Fields Start")
         AddBearing()
-        logger.info("--- --- --- --- Add Fields Complete")
-
-        logger.info("--- --- --- --- Create Lines Start")
         CreateLines()
-        logger.info("--- --- --- --- Create Lines Complete")
-
-        logger.info("--- --- --- --- Create Lines Start")
         AddFields()
-        logger.info("--- --- --- --- Create Lines Complete")
-
-        logger.info("--- --- --- --- Create Lines Start")
         BearingCalculation()
-        logger.info("--- --- --- --- Create Lines Complete")
-
-    except (IOError, KeyError, NameError, IndexError, TypeError, UnboundLocalError):
-        tbinfo = traceback.format_exc()
+    except (IOError, KeyError, NameError, IndexError, TypeError, UnboundLocalError, ValueError):
+        traceback_info = traceback.format_exc()
         try:
-            logger.error(tbinfo)
+            logger.info(traceback_info)
         except NameError:
-            print(tbinfo)
-
+            print(traceback_info)
     except arcpy.ExecuteError:
         try:
-            tbinfo = traceback.format_exc(2)
-            logger.error(tbinfo)
+            logger.error(arcpy.GetMessages(2))
         except NameError:
             print(arcpy.GetMessages(2))
-
     except:
-        logger.exception("Picked up an exception:")
-
+        logger.exception("Picked up an exception!")
     finally:
         try:
-            logger.info("--- Script Execution Completed ---")
-            logging.shutdown()
+            logger.info("Script Execution Complete")
         except NameError:
             pass
 
