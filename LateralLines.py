@@ -63,8 +63,6 @@ def LateralLines():
     # Paths
     fgdb_services = r"F:\Shares\FGDB_Services"
     sde = os.path.join(fgdb_services, r"DatabaseConnections\COSPW@imSPFLD@MCWINTCWDB.sde")
-    sewer_engineering = os.path.join(sde, "SewerEngineering")
-    pacp_observations = os.path.join(sewer_engineering, "pacpObservations")
     sewer_stormwater = os.path.join(sde, "SewerStormwater")
     gravity_mains = os.path.join(sewer_stormwater, "ssGravityMain")
     lateral_lines = os.path.join(fgdb_services, r"Data\LateralLines.gdb")
@@ -82,7 +80,6 @@ def LateralLines():
     # Create temporary data
     arcpy.FeatureClassToFeatureClass_conversion(gravity_mains, lateral_lines, "ssGravityMain", "OWNEDBY = 1 And WATERTYPE <> 'SW' And Stage = 0")
     arcpy.MakeFeatureLayer_management(gravity_mains_temp, "ssGravityMain")
-    arcpy.FeatureClassToFeatureClass_conversion(pacp_observations, lateral_lines, "Connections", "Code IN ('TB', 'TBA', 'TBB', 'TBD', 'TBI', 'TF', 'TFA', 'TFB', 'TFC', 'TFD', 'TFI', 'TS', 'TSD')")
 
     @logging_lines("Add Bearing")
     def AddBearing():
@@ -92,7 +89,7 @@ def LateralLines():
         arcpy.CalculateGeometryAttributes_management("ssGravityMain", [["BEARING", "LINE_BEARING"]])
 
     @logging_lines("Create Lines")
-    def CreateLines():
+    def PlacePoints():
         """Place observations along gravity mains based off of length and direction"""
 
         arcpy.CreateRoutes_lr("ssGravityMain", "FACILITYID", routes)
@@ -103,7 +100,7 @@ def LateralLines():
 
     @logging_lines("Add Fields")
     def AddFields():
-        """Add more fields: LATID, LATDIST"""
+        """Add more fields: LATID, LATDIST; remove a lot of unnecessary fields"""
 
         arcpy.AddXY_management("Connections")
         arcpy.AddFields_management("Connections",
@@ -117,7 +114,8 @@ def LateralLines():
                                       "COMMENT", "SPATAILID", "ADDRESS", "DISTRICT", "PLANT", "SOURCEID", "SOURCEATT", "SOURCEZ", "SOURCEXY", "NAD83XSTART", "NAD83YSTART", "SPATAILSTART", "NAD83XEND", "NAD83YEND",
                                       "SPATAILEND", "SURFCOND", "SURVMATERIAL", "SURVHEIGHT", "SURVSHAPE", "SURVDSELEV", "SURVUSELEV", "SURVLENGTH", "SURVSLOPE", "GXPCITY", "SLRATID", "SLRATSCORE", "SLRATSTATUS",
                                       "STAGE", "SLRATCOND", "CCTVCOND", "CCTVDATE", "ID", "AssetID", "Join_Count", "AssetSubType", "Percentage", "Length", "LengthUOM", "UntilAngle", "UntilAngleUOM",
-                                      "PercentageUOM"])
+                                      "PercentageUOM", "AtAngleUOM", "IsAtJoint", "Latitude", "Longitude", "RefAngle", "Comments", "ToDistanceUOM", "Quantification2", "SURVWIDTH", "SLRATDATE", "FROMMH1", "TOMH1",
+                                      "POINT_M"])
 
     @logging_lines("Bearing Calculation")
     def BearingCalculation():
@@ -155,13 +153,16 @@ def LateralLines():
                                           ["BEARING", "!BEARING!+90"]])
 
         # Use all of this new information to make a 25ft line running at a bearing determined by direction and angle
-        selected_connections = arcpy.SelectLayerByAttribute_management("Connections", "NEW_SELECTION", "BEARING IS NOT NULL")
+        selected_connections = arcpy.SelectLayerByAttribute_management("Connections", "NEW_SELECTION", "BEARING IS NOT NULL AND "
+                                                                                                       "Code IN ('TB', 'TBA', 'TBB', 'TBD', 'TBI', 'TF', 'TFA', 'TFB', 'TFC', 'TFD', 'TFI', 'TS', 'TSD') AND "
+                                                                                                       "SurvDirection IS NOT NULL AND "
+                                                                                                       "AtAngle IS NOT NULL")
         arcpy.BearingDistanceToLine_management(selected_connections, laterals, "POINT_X", "POINT_Y", "LATDIST", "FEET", "BEARING")
 
     # Try running above scripts
     try:
         AddBearing()
-        CreateLines()
+        PlacePoints()
         AddFields()
         BearingCalculation()
     except (IOError, KeyError, NameError, IndexError, TypeError, UnboundLocalError, ValueError):
